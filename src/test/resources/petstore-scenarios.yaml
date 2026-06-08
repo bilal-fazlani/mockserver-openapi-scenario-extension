@@ -1,0 +1,40 @@
+openapi: 3.0.3
+info:
+  title: Petstore Scenario API
+  version: 1.0.0
+paths:
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Pet found
+          content:
+            application/json:
+              examples:
+                success:
+                  value:
+                    id: "123"
+                    name: Luna
+        "404":
+          description: Pet not found
+          content:
+            application/json:
+              examples:
+                not-found:
+                  value:
+                    code: PET_NOT_FOUND
+                    message: Pet was not found
+      x-mockserver-scenarios:
+        - matcher:
+            pathParameters:
+              petId:
+                - "404"
+          response: not-found
+        - response: success

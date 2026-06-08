@@ -1,0 +1,32 @@
+openapi: 3.0.3
+info:
+  title: Matcherless First API
+  version: 1.0.0
+paths:
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      responses:
+        "200":
+          description: Pet found
+          content:
+            application/json:
+              examples:
+                success:
+                  value:
+                    id: "123"
+        "404":
+          description: Pet not found
+          content:
+            application/json:
+              examples:
+                not-found:
+                  value:
+                    code: PET_NOT_FOUND
+      x-mockserver-scenarios:
+        - response: success
+        - matcher:
+            pathParameters:
+              petId:
+                - "404"
+          response: not-found

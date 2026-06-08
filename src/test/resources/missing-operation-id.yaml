@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info:
+  title: Missing Operation Id API
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      responses:
+        "200":
+          description: Pets found
+          content:
+            application/json:
+              examples:
+                success:
+                  value:
+                    pets: []
+      x-mockserver-scenarios:
+        - response: success

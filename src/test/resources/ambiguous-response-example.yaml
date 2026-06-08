@@ -1,0 +1,27 @@
+openapi: 3.0.3
+info:
+  title: Ambiguous Response Example API
+  version: 1.0.0
+paths:
+  /problem:
+    get:
+      operationId: getProblem
+      responses:
+        "200":
+          description: First problem
+          content:
+            application/json:
+              examples:
+                problem:
+                  value:
+                    status: OK
+        "400":
+          description: Second problem
+          content:
+            application/json:
+              examples:
+                problem:
+                  value:
+                    status: BAD_REQUEST
+      x-mockserver-scenarios:
+        - response: problem
