@@ -35,6 +35,19 @@ class OpenApiScenarioProxyTest {
     }
 
     @Test
+    void treatsAdminIndexStylesheetsAsIndexAssets() {
+        assertThat(OpenApiScenarioProxy.isIndexStylesRoute(
+                        "/mockserver/openapi/docs/styles.css", "/mockserver/openapi/docs"))
+                .isTrue();
+        assertThat(OpenApiScenarioProxy.isIndexStylesRoute(
+                        "/mockserver/dashboard/styles.css", "/mockserver/dashboard"))
+                .isTrue();
+        assertThat(OpenApiScenarioProxy.isIndexStylesRoute(
+                        "/mockserver/openapi/docs-extra/styles.css", "/mockserver/openapi/docs"))
+                .isFalse();
+    }
+
+    @Test
     void configuresChildMockServerOnInternalPortWithoutDocsExpectations() {
         var environment = new HashMap<String, String>();
         environment.put("SERVER_PORT", "1080");

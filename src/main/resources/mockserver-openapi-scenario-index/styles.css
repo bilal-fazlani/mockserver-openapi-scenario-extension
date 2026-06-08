@@ -1,0 +1,52 @@
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #f7f7f8;
+  color: #1f2933;
+}
+
+main {
+  max-width: 720px;
+  margin: 48px auto;
+  padding: 0 24px;
+}
+
+h1 {
+  font-size: 1.5rem;
+  line-height: 1.2;
+  margin: 0 0 20px;
+}
+
+.service-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #d8dee6;
+  background: white;
+}
+
+.service-list__item + .service-list__item {
+  border-top: 1px solid #d8dee6;
+}
+
+.service-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  color: #0f5cad;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.service-link:hover {
+  background: #eef5ff;
+}
+
+.service-link__port {
+  flex: 0 0 auto;
+  color: #52616f;
+  font-size: 0.875rem;
+  font-weight: 500;
+}

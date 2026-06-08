@@ -94,6 +94,10 @@ class OpenApiScenarioServiceRegistryTest {
         assertThat(html)
                 .contains("http://localhost:1081/mockserver/openapi/docs")
                 .contains("http://localhost:1082/mockserver/openapi/docs")
+                .contains("port 1081")
+                .contains("port 1082")
+                .contains("/mockserver/openapi/docs/styles.css")
+                .doesNotContain("<style>")
                 .doesNotContain("/mockserver/openapi/docs/accertify")
                 .doesNotContain("/mockserver/openapi/docs/worldpay");
     }
@@ -107,6 +111,10 @@ class OpenApiScenarioServiceRegistryTest {
         assertThat(html)
                 .contains("http://localhost:1081/mockserver/dashboard")
                 .contains("http://localhost:1082/mockserver/dashboard")
+                .contains("port 1081")
+                .contains("port 1082")
+                .contains("/mockserver/dashboard/styles.css")
+                .doesNotContain("<style>")
                 .doesNotContain("/mockserver/dashboard/accertify")
                 .doesNotContain("/mockserver/dashboard/worldpay");
     }

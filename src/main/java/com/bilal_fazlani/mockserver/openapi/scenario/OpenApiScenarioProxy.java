@@ -133,6 +133,10 @@ public final class OpenApiScenarioProxy {
         return requestPath.equals(normalizedIndexPath) || requestPath.equals(normalizedIndexPath + "/");
     }
 
+    static boolean isIndexStylesRoute(String requestPath, String indexPath) {
+        return requestPath.equals(normalizedDocsPath(indexPath) + "/styles.css");
+    }
+
     static void configureMockServerEnvironment(Map<String, String> environment, int mockServerPort, Path specPath) {
         environment.put(SERVER_PORT_ENV, String.valueOf(mockServerPort));
         environment.put(DOCS_ENABLED_ENV, "false");
@@ -324,6 +328,18 @@ public final class OpenApiScenarioProxy {
                         "OK",
                         "text/html; charset=utf-8",
                         registry.docsIndexHtml(initialRequest.hostHeader(), docsPath));
+                return;
+            }
+
+            if (isIndexStylesRoute(initialRequest.path(), docsPath)
+                    || isIndexStylesRoute(initialRequest.path(), DASHBOARD_PATH)) {
+                sendResponse(
+                        clientSocket.getOutputStream(),
+                        initialRequest.method(),
+                        200,
+                        "OK",
+                        "text/css; charset=utf-8",
+                        registry.indexStylesCss());
                 return;
             }
 

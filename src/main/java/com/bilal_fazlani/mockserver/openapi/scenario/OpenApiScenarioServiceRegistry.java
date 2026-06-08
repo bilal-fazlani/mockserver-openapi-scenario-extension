@@ -1,5 +1,7 @@
 package com.bilal_fazlani.mockserver.openapi.scenario;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,6 +20,7 @@ import java.util.regex.Pattern;
  */
 final class OpenApiScenarioServiceRegistry {
 
+    private static final String INDEX_RESOURCE_ROOT = "mockserver-openapi-scenario-index/";
     private static final Set<String> RESERVED_SERVICE_IDS =
             Set.of("assets", "favicon.ico", "apple-touch-icon.png", "frame", "mockserver");
     private static final Pattern SERVICE_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*");
@@ -79,9 +82,12 @@ final class OpenApiScenarioServiceRegistry {
         var normalizedDocsPath = normalizedPath(docsPath);
         return indexHtml(
                 "OpenAPI Scenario Docs",
+                normalizedDocsPath + "/styles.css",
                 services.stream()
                         .map(service -> new IndexLink(
-                                service.id(), serviceUrl(hostHeader, service.publicPort(), normalizedDocsPath)))
+                                service.id(),
+                                service.publicPort(),
+                                serviceUrl(hostHeader, service.publicPort(), normalizedDocsPath)))
                         .toList());
     }
 
@@ -93,10 +99,17 @@ final class OpenApiScenarioServiceRegistry {
         var normalizedDashboardPath = normalizedPath(dashboardPath);
         return indexHtml(
                 "MockServer Dashboards",
+                normalizedDashboardPath + "/styles.css",
                 services.stream()
                         .map(service -> new IndexLink(
-                                service.id(), serviceUrl(hostHeader, service.publicPort(), normalizedDashboardPath)))
+                                service.id(),
+                                service.publicPort(),
+                                serviceUrl(hostHeader, service.publicPort(), normalizedDashboardPath)))
                         .toList());
+    }
+
+    String indexStylesCss() {
+        return resource(INDEX_RESOURCE_ROOT + "styles.css");
     }
 
     private static List<Path> discoverSpecPaths(Path specDirectory) {
@@ -216,41 +229,42 @@ final class OpenApiScenarioServiceRegistry {
         }
     }
 
-    private static String indexHtml(String title, List<IndexLink> links) {
-        var items = new StringBuilder();
+    private static String indexHtml(String title, String stylesPath, List<IndexLink> links) {
+        var linkTemplate = resource(INDEX_RESOURCE_ROOT + "link.html");
+        var renderedLinks = new StringBuilder();
         for (var link : links) {
-            items.append("<li><a href=\"")
-                    .append(htmlAttribute(link.href()))
-                    .append("\">")
-                    .append(html(link.label()))
-                    .append("</a></li>");
+            renderedLinks.append(template(
+                    linkTemplate,
+                    Map.of(
+                            "{{href}}", htmlAttribute(link.href()),
+                            "{{label}}", html(link.label()),
+                            "{{port}}", String.valueOf(link.port()))));
         }
-        return """
-                <!doctype html>
-                <html lang="en">
-                  <head>
-                    <meta charset="utf-8" />
-                    <meta name="viewport" content="width=device-width, initial-scale=1" />
-                    <title>%s</title>
-                    <style>
-                      body { margin: 0; font-family: system-ui, sans-serif; background: #f7f7f8; color: #1f2933; }
-                      main { max-width: 720px; margin: 48px auto; padding: 0 24px; }
-                      h1 { font-size: 1.5rem; line-height: 1.2; margin: 0 0 20px; }
-                      ul { list-style: none; margin: 0; padding: 0; border: 1px solid #d8dee6; background: white; }
-                      li + li { border-top: 1px solid #d8dee6; }
-                      a { display: block; padding: 14px 16px; color: #0f5cad; text-decoration: none; font-weight: 600; }
-                      a:hover { background: #eef5ff; }
-                    </style>
-                  </head>
-                  <body>
-                    <main>
-                      <h1>%s</h1>
-                      <ul>%s</ul>
-                    </main>
-                  </body>
-                </html>
-                """
-                .formatted(html(title), html(title), items);
+        return template(
+                resource(INDEX_RESOURCE_ROOT + "index.html"),
+                Map.of(
+                        "{{title}}", html(title),
+                        "{{stylesPath}}", htmlAttribute(stylesPath),
+                        "{{links}}", renderedLinks.toString()));
+    }
+
+    private static String template(String source, Map<String, String> replacements) {
+        var result = source;
+        for (var entry : replacements.entrySet()) {
+            result = result.replace(entry.getKey(), entry.getValue());
+        }
+        return result;
+    }
+
+    private static String resource(String resourcePath) {
+        try (var stream = OpenApiScenarioServiceRegistry.class.getClassLoader().getResourceAsStream(resourcePath)) {
+            if (stream == null) {
+                throw new OpenApiScenarioException("Missing OpenAPI scenario index resource: " + resourcePath);
+            }
+            return new String(stream.readAllBytes(), UTF_8);
+        } catch (IOException e) {
+            throw new OpenApiScenarioException("Unable to read OpenAPI scenario index resource: " + resourcePath, e);
+        }
     }
 
     private static String normalizedPath(String path) {
@@ -314,5 +328,5 @@ final class OpenApiScenarioServiceRegistry {
         }
     }
 
-    private record IndexLink(String label, String href) {}
+    private record IndexLink(String label, int port, String href) {}
 }
