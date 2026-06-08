@@ -4,7 +4,11 @@ on:
   push:
     branches:
       - "**"
+    paths-ignore:
+      - "gradle.properties"
   pull_request:
+    paths-ignore:
+      - "gradle.properties"
 
 permissions:
   contents: read
@@ -27,5 +31,5 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Test
-        run: ./gradlew test
+      - name: Test and build runtime jar
+        run: ./gradlew test runtimeJar

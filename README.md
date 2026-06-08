@@ -74,27 +74,25 @@ For OpenAPI templated paths such as `/pets/{petId}`, the extension adds wildcard
 `runtimeJar` creates a Docker-friendly shaded jar:
 
 ```text
-build/libs/mockserver-openapi-scenario-extension-<version>-all.jar
+build/libs/mockserver-openapi-scenario-extension-all.jar
 ```
 
 The shaded jar includes this extension's runtime dependencies but excludes MockServer itself, which is already present in the MockServer container.
 
 ## Docker Usage
 
-Mount the shaded jar into MockServer's `/libs` directory and point the initializer at an OpenAPI file:
+Use the prebuilt GHCR image and point the initializer at an OpenAPI file:
 
 ```yaml
 services:
   mockserver:
-    image: mockserver/mockserver:7.0.0
+    image: ghcr.io/bilal-fazlani/mockserver-openapi-scenario-extension:0.0.1
     ports:
       - "1080:1080"
     environment:
-      MOCKSERVER_INITIALIZATION_CLASS: com.bilal_fazlani.mockserver.openapi.scenario.OpenApiScenarioInitializer
       MOCKSERVER_OPENAPI_SCENARIOS_SPEC: /config/openapi/api.yaml
     volumes:
       - ./api.yaml:/config/openapi/api.yaml:ro
-      - ./build/libs/mockserver-openapi-scenario-extension-0.1.0-SNAPSHOT-all.jar:/libs/mockserver-openapi-scenario-extension.jar:ro
 ```
 
 The spec path can also be provided as a Java system property:
@@ -103,10 +101,24 @@ The spec path can also be provided as a Java system property:
 mockserver.openapi.scenarios.spec=/config/openapi/api.yaml
 ```
 
+### Custom MockServer Image
+
+If you need to build your own image, copy the runtime jar into MockServer's `/libs` directory and set the initializer class:
+
+```dockerfile
+FROM mockserver/mockserver:7.0.0
+
+COPY build/libs/mockserver-openapi-scenario-extension-all.jar /libs/mockserver-openapi-scenario-extension.jar
+
+ENV MOCKSERVER_INITIALIZATION_CLASS=com.bilal_fazlani.mockserver.openapi.scenario.OpenApiScenarioInitializer
+```
+
 ## Development
 
 ```bash
 ./gradlew test
+./gradlew runtimeJar
+docker build -t mockserver-openapi-scenario-extension:local .
 ```
 
 The tests exercise scenario conversion without starting a MockServer process.

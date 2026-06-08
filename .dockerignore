@@ -1,0 +1,5 @@
+*
+!Dockerfile
+!build/
+!build/libs/
+!build/libs/mockserver-openapi-scenario-extension-all.jar

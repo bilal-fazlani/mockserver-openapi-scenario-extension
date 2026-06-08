@@ -39,6 +39,7 @@ tasks.register<Jar>("runtimeJar") {
     group = "build"
     description = "Builds a Docker /libs friendly jar including runtime dependencies but excluding MockServer."
     archiveClassifier.set("all")
+    archiveFileName.set("mockserver-openapi-scenario-extension-all.jar")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
     from(sourceSets.main.get().output)
