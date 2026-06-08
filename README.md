@@ -101,7 +101,9 @@ The Docker image also serves a Swagger UI based documentation page at:
 http://localhost:1080/mockserver/openapi/docs
 ```
 
-That page reads the same OpenAPI document from MockServer, expands the usual Swagger request and response documentation, and renders `x-mockserver-scenarios` beside each operation. The renderer summarizes known matcher shapes, such as body JSONPath matchers, without duplicating MockServer's matching engine in the browser.
+That page reads the same OpenAPI document, expands the usual Swagger request and response documentation, and renders `x-mockserver-scenarios` beside each operation. The renderer summarizes known matcher shapes, such as body JSONPath matchers, without duplicating MockServer's matching engine in the browser.
+
+The docs UI is served by the Docker image before requests are proxied to MockServer, so MockServer's dashboard only shows API expectations generated from `x-mockserver-scenarios`.
 
 The spec path can also be provided as a Java system property:
 
@@ -112,13 +114,13 @@ mockserver.openapi.scenarios.spec=/config/openapi/api.yaml
 Docs settings:
 
 ```text
-MOCKSERVER_OPENAPI_SCENARIOS_DOCS_ENABLED=true
 MOCKSERVER_OPENAPI_SCENARIOS_DOCS_PATH=/mockserver/openapi/docs
+MOCKSERVER_OPENAPI_SCENARIOS_MOCKSERVER_PORT=1081
 ```
 
-The published Docker image enables the docs UI by default. Library users who wire the initializer into another MockServer setup must opt in with `mockserver.openapi.scenarios.docs.enabled=true` or `MOCKSERVER_OPENAPI_SCENARIOS_DOCS_ENABLED=true`.
+The published Docker image enables the docs UI by default. `MOCKSERVER_OPENAPI_SCENARIOS_MOCKSERVER_PORT` is the internal child MockServer port inside the container; most consumers should leave it at the default.
 
-The Docker image defaults MockServer logging to `WARN` because Swagger UI assets are served through MockServer and INFO logs can include large response bodies. Set `MOCKSERVER_LOG_LEVEL=INFO` when you want MockServer's detailed request and expectation logs.
+The Docker image defaults MockServer logging to `WARN`. Set `MOCKSERVER_LOG_LEVEL=INFO` when you want MockServer's detailed request and expectation logs.
 
 ### Custom MockServer Image
 
@@ -130,9 +132,11 @@ FROM mockserver/mockserver:7.0.0
 COPY build/libs/mockserver-openapi-scenario-extension-all.jar /libs/mockserver-openapi-scenario-extension.jar
 
 ENV MOCKSERVER_INITIALIZATION_CLASS=com.bilal_fazlani.mockserver.openapi.scenario.OpenApiScenarioInitializer
-ENV MOCKSERVER_OPENAPI_SCENARIOS_DOCS_ENABLED=true
 ENV MOCKSERVER_OPENAPI_SCENARIOS_DOCS_PATH=/mockserver/openapi/docs
+ENV MOCKSERVER_OPENAPI_SCENARIOS_MOCKSERVER_PORT=1081
 ENV MOCKSERVER_LOG_LEVEL=WARN
+
+ENTRYPOINT ["java", "-Dfile.encoding=UTF-8", "-cp", "/mockserver-netty-jar-with-dependencies.jar:/libs/*", "-Dmockserver.propertyFile=/config/mockserver.properties", "com.bilal_fazlani.mockserver.openapi.scenario.OpenApiScenarioProxy"]
 ```
 
 ## Development

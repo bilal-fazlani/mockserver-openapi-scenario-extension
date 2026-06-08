@@ -37,6 +37,26 @@ class OpenApiScenarioDocsTest {
     }
 
     @Test
+    void createsDocsContentWithoutMockServerExpectations() {
+        var docs = new OpenApiScenarioDocs().content(DOCS_SCENARIOS, "/mockserver/openapi/docs");
+
+        assertThat(docs)
+                .extracting(OpenApiScenarioDocs.StaticContent::path)
+                .containsExactly(
+                        "/mockserver/openapi/docs",
+                        "/mockserver/openapi/docs/openapi.yaml",
+                        "/mockserver/openapi/docs/scenarios.js",
+                        "/mockserver/openapi/docs/styles.css",
+                        "/mockserver/openapi/docs/swagger-ui.css",
+                        "/mockserver/openapi/docs/swagger-ui-bundle.js",
+                        "/mockserver/openapi/docs/swagger-ui-standalone-preset.js");
+
+        assertThat(docs.get(0).contentType()).isEqualTo("text/html; charset=utf-8");
+        assertThat(docs.get(0).body()).contains("docExpansion: \"full\"");
+        assertThat(docs.get(2).body()).contains("POST /v1/fraud/assessment");
+    }
+
+    @Test
     void servesTheOriginalOpenApiDocument() {
         var expectations = new OpenApiScenarioDocs().load(DOCS_SCENARIOS, "/mockserver/openapi/docs");
 

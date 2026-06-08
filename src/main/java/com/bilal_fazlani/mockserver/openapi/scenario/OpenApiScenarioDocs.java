@@ -50,42 +50,55 @@ public class OpenApiScenarioDocs {
      * @return documentation expectations
      */
     public List<Expectation> load(Path openApiPath, String docsPath) {
+        return content(openApiPath, docsPath).stream()
+                .map(OpenApiScenarioDocs::toExpectation)
+                .toList();
+    }
+
+    /**
+     * Creates static documentation content for an OpenAPI document without registering expectations.
+     *
+     * @param openApiPath OpenAPI YAML or JSON file
+     * @param docsPath HTTP path where the docs UI should be served
+     * @return documentation content
+     */
+    public List<StaticContent> content(Path openApiPath, String docsPath) {
         var normalizedDocsPath = normalizedDocsPath(docsPath);
         var openApi = readOpenApi(openApiPath);
         var scenarioData = scenarioData(openApi, openApiPath);
 
         return List.of(
-                expectation(
+                new StaticContent(
                         "openapi-scenarios-docs-index",
                         normalizedDocsPath,
                         "text/html; charset=utf-8",
                         indexHtml(normalizedDocsPath)),
-                expectation(
+                new StaticContent(
                         "openapi-scenarios-docs-openapi",
                         normalizedDocsPath + "/openapi.yaml",
                         "application/yaml; charset=utf-8",
                         openApi),
-                expectation(
+                new StaticContent(
                         "openapi-scenarios-docs-scenarios",
                         normalizedDocsPath + "/scenarios.js",
                         "application/javascript; charset=utf-8",
                         scenarioRendererScript(scenarioData)),
-                expectation(
+                new StaticContent(
                         "openapi-scenarios-docs-styles-css",
                         normalizedDocsPath + "/styles.css",
                         "text/css; charset=utf-8",
                         resource(DOCS_RESOURCE_ROOT + "styles.css")),
-                swaggerUiAsset(
+                swaggerUiContent(
                         "openapi-scenarios-docs-swagger-ui-css",
                         normalizedDocsPath + "/swagger-ui.css",
                         "text/css; charset=utf-8",
                         "swagger-ui.css"),
-                swaggerUiAsset(
+                swaggerUiContent(
                         "openapi-scenarios-docs-swagger-ui-bundle-js",
                         normalizedDocsPath + "/swagger-ui-bundle.js",
                         "application/javascript; charset=utf-8",
                         "swagger-ui-bundle.js"),
-                swaggerUiAsset(
+                swaggerUiContent(
                         "openapi-scenarios-docs-swagger-ui-standalone-preset-js",
                         normalizedDocsPath + "/swagger-ui-standalone-preset.js",
                         "application/javascript; charset=utf-8",
@@ -115,7 +128,7 @@ public class OpenApiScenarioDocs {
         }
     }
 
-    private static Expectation swaggerUiAsset(String id, String path, String contentType, String assetName) {
+    private static StaticContent swaggerUiContent(String id, String path, String contentType, String assetName) {
         var resourcePath = "META-INF/resources/webjars/swagger-ui-dist/"
                 + SWAGGER_UI_VERSION
                 + "/"
@@ -124,8 +137,7 @@ public class OpenApiScenarioDocs {
             if (stream == null) {
                 throw new OpenApiScenarioException("Missing bundled Swagger UI asset " + resourcePath + ".");
             }
-            OpenApiScenarioDocsCallback.register(path, contentType, new String(stream.readAllBytes(), UTF_8));
-            return callbackExpectation(id, path);
+            return new StaticContent(id, path, contentType, new String(stream.readAllBytes(), UTF_8));
         } catch (IOException e) {
             throw new OpenApiScenarioException("Unable to read bundled Swagger UI asset " + resourcePath, e);
         }
@@ -141,10 +153,19 @@ public class OpenApiScenarioDocs {
                         .withBody(body));
     }
 
-    private static Expectation callbackExpectation(String id, String path) {
-        return Expectation.when(request().withMethod("GET").withPath(path), DOCS_PRIORITY)
-                .withId(id)
-                .thenRespond(callback(OpenApiScenarioDocsCallback.class));
+    private static Expectation toExpectation(StaticContent staticContent) {
+        if (staticContent.id().contains("swagger-ui")) {
+            OpenApiScenarioDocsCallback.register(
+                    staticContent.path(), staticContent.contentType(), staticContent.body());
+            return Expectation.when(request().withMethod("GET").withPath(staticContent.path()), DOCS_PRIORITY)
+                    .withId(staticContent.id())
+                    .thenRespond(callback(OpenApiScenarioDocsCallback.class));
+        }
+        return expectation(
+                staticContent.id(),
+                staticContent.path(),
+                staticContent.contentType(),
+                staticContent.body());
     }
 
     private static String indexHtml(String docsPath) {
@@ -237,4 +258,9 @@ public class OpenApiScenarioDocs {
             throw new OpenApiScenarioException("Unable to render docs URL " + value, e);
         }
     }
+
+    /**
+     * Static documentation content served either by expectations or the Docker proxy.
+     */
+    public record StaticContent(String id, String path, String contentType, String body) {}
 }
