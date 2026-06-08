@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: Accertify
+  version: 1.0.0
+paths:
+  /accertify/assessment:
+    post:
+      operationId: assessAccertify
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+      responses:
+        "200":
+          description: Accepted
+          content:
+            application/json:
+              examples:
+                accept:
+                  value:
+                    status: ACCEPT
+      x-mockserver-scenarios:
+        - response: accept

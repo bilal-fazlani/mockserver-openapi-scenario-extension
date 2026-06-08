@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: Worldpay
+  version: 1.0.0
+paths:
+  /worldpay/payments:
+    post:
+      operationId: createWorldpayPayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - amount
+              properties:
+                amount:
+                  type: integer
+      responses:
+        "200":
+          description: Payment accepted
+          content:
+            application/json:
+              examples:
+                accepted:
+                  value:
+                    status: ACCEPTED
+      x-mockserver-scenarios:
+        - response: accepted

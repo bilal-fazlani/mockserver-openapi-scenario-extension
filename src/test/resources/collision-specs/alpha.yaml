@@ -1,0 +1,19 @@
+openapi: 3.0.3
+info:
+  title: Alpha
+  version: 1.0.0
+paths:
+  /shared/{id}:
+    get:
+      operationId: getAlpha
+      responses:
+        "200":
+          description: Alpha response
+          content:
+            application/json:
+              examples:
+                ok:
+                  value:
+                    source: alpha
+      x-mockserver-scenarios:
+        - response: ok

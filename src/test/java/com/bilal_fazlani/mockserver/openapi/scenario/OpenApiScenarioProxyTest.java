@@ -40,10 +40,13 @@ class OpenApiScenarioProxyTest {
         environment.put("SERVER_PORT", "1080");
         environment.put(OpenApiScenarioProxy.DOCS_ENABLED_ENV, "true");
 
-        OpenApiScenarioProxy.configureMockServerEnvironment(environment, 1081);
+        OpenApiScenarioProxy.configureMockServerEnvironment(
+                environment, 1081, java.nio.file.Path.of("/config/openapi/accertify.yaml"));
 
         assertThat(environment.get("SERVER_PORT")).isEqualTo("1081");
         assertThat(environment.get(OpenApiScenarioProxy.DOCS_ENABLED_ENV)).isEqualTo("false");
+        assertThat(environment.get(OpenApiScenarioInitializer.SPEC_PATH_ENV))
+                .isEqualTo("/config/openapi/accertify.yaml");
     }
 
     @Test

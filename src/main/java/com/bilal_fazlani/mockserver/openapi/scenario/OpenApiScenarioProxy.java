@@ -37,11 +37,15 @@ public final class OpenApiScenarioProxy {
     public static final String DOCS_ENABLED_ENV = "MOCKSERVER_OPENAPI_SCENARIOS_DOCS_ENABLED";
     public static final String DOCS_PATH_PROPERTY = "mockserver.openapi.scenarios.docs.path";
     public static final String DOCS_PATH_ENV = "MOCKSERVER_OPENAPI_SCENARIOS_DOCS_PATH";
+    public static final String SPEC_DIR_PROPERTY = "mockserver.openapi.scenarios.spec.dir";
+    public static final String SPEC_DIR_ENV = "MOCKSERVER_OPENAPI_SCENARIOS_SPEC_DIR";
+    public static final String SERVICE_PORTS_PROPERTY = "mockserver.openapi.scenarios.service.ports";
+    public static final String SERVICE_PORTS_ENV = "MOCKSERVER_OPENAPI_SCENARIOS_SERVICE_PORTS";
 
     private static final String SERVER_PORT_ENV = "SERVER_PORT";
-    private static final String INTERNAL_MOCKSERVER_PORT_ENV = "MOCKSERVER_OPENAPI_SCENARIOS_MOCKSERVER_PORT";
+    private static final String DEFAULT_SPEC_DIR = "/config/openapi";
+    private static final String DASHBOARD_PATH = "/mockserver/dashboard";
     private static final int DEFAULT_PUBLIC_PORT = 1080;
-    private static final int DEFAULT_INTERNAL_MOCKSERVER_PORT = 1081;
     private static final int MAX_INITIAL_REQUEST_BYTES = 64 * 1024;
     private static final int MAX_VALIDATED_BODY_BYTES = 10 * 1024 * 1024;
     private static final Duration MOCKSERVER_SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
@@ -51,46 +55,60 @@ public final class OpenApiScenarioProxy {
     private OpenApiScenarioProxy() {}
 
     public static void main(String[] args) throws IOException {
-        var specPath = Path.of(configuredValue(
-                OpenApiScenarioInitializer.SPEC_PATH_PROPERTY,
-                OpenApiScenarioInitializer.SPEC_PATH_ENV,
-                null));
+        var specDirectory = Path.of(configuredValue(SPEC_DIR_PROPERTY, SPEC_DIR_ENV, DEFAULT_SPEC_DIR));
         var docsPath = normalizedDocsPath(configuredValue(
                 DOCS_PATH_PROPERTY,
                 DOCS_PATH_ENV,
                 OpenApiScenarioDocs.DEFAULT_DOCS_PATH));
         var publicPort = configuredInt(SERVER_PORT_ENV, DEFAULT_PUBLIC_PORT);
-        var mockServerPort = configuredInt(INTERNAL_MOCKSERVER_PORT_ENV, DEFAULT_INTERNAL_MOCKSERVER_PORT);
 
-        var docs = docsByPath(new OpenApiScenarioDocs().content(specPath, docsPath));
-        var requestValidator = new OpenApiScenarioRequestValidator(specPath);
-        var serverSocket = serverSocket(publicPort);
-        var mockServer = startMockServer(mockServerPort);
+        var servicePorts = configuredValue(SERVICE_PORTS_PROPERTY, SERVICE_PORTS_ENV, "");
+        var registry = OpenApiScenarioServiceRegistry.load(specDirectory, servicePorts, publicPort + 1);
+        var serverSockets = new java.util.ArrayList<ServerSocket>();
+        var mockServers = new java.util.ArrayList<MockServerRuntime>();
         var executor = Executors.newCachedThreadPool();
         var activeSockets = ConcurrentHashMap.<Socket>newKeySet();
-        var shutdown = new Shutdown(serverSocket, executor, activeSockets, mockServer);
-        Runtime.getRuntime().addShutdownHook(new Thread(shutdown, "openapi-scenario-proxy-shutdown"));
+        Shutdown shutdown = null;
 
         int exitCode = 0;
         try {
+            mockServers.addAll(startMockServers(registry));
+            var adminServerSocket = serverSocket(publicPort);
+            serverSockets.add(adminServerSocket);
+            var serviceSockets = serviceServerSockets(registry);
+            serverSockets.addAll(serviceSockets.values());
+            shutdown = new Shutdown(List.copyOf(serverSockets), executor, activeSockets, List.copyOf(mockServers));
+            Runtime.getRuntime().addShutdownHook(new Thread(shutdown, "openapi-scenario-proxy-shutdown"));
+            var runningShutdown = shutdown;
+
             System.out.printf(
-                    "Serving OpenAPI scenario docs at %s and proxying MockServer on port %d.%n",
-                    docsPath, publicPort);
-            executor.execute(() -> acceptLoop(
-                    serverSocket,
+                    "Serving %d OpenAPI scenario service(s) from %s with indexes on port %d.%n",
+                    registry.services().size(), specDirectory, publicPort);
+            executor.execute(() -> acceptAdminLoop(
+                    adminServerSocket,
                     executor,
                     activeSockets,
-                    docs,
+                    registry,
                     docsPath,
-                    requestValidator,
-                    mockServerPort,
-                    shutdown));
-            exitCode = mockServer.waitFor();
+                    runningShutdown));
+            for (var mockServer : mockServers) {
+                var serviceSocket = serviceSockets.get(mockServer.service().id());
+                var docs = docsByPath(registry.docsContent(mockServer.service(), docsPath));
+                executor.execute(() -> acceptServiceLoop(
+                        serviceSocket, executor, activeSockets, docs, docsPath, mockServer, runningShutdown));
+            }
+            exitCode = waitForFirstMockServerExit(mockServers);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             exitCode = 130;
         } finally {
-            shutdown.run();
+            if (shutdown != null) {
+                shutdown.run();
+            } else {
+                serverSockets.forEach(OpenApiScenarioProxy::closeQuietly);
+                stopMockServers(mockServers);
+                executor.shutdownNow();
+            }
         }
 
         if (exitCode != 0) {
@@ -110,19 +128,38 @@ public final class OpenApiScenarioProxy {
                 || requestPath.startsWith("/_mockserver");
     }
 
-    static void configureMockServerEnvironment(Map<String, String> environment, int mockServerPort) {
+    static boolean isIndexRoute(String requestPath, String indexPath) {
+        var normalizedIndexPath = normalizedDocsPath(indexPath);
+        return requestPath.equals(normalizedIndexPath) || requestPath.equals(normalizedIndexPath + "/");
+    }
+
+    static void configureMockServerEnvironment(Map<String, String> environment, int mockServerPort, Path specPath) {
         environment.put(SERVER_PORT_ENV, String.valueOf(mockServerPort));
         environment.put(DOCS_ENABLED_ENV, "false");
+        environment.put(OpenApiScenarioInitializer.SPEC_PATH_ENV, specPath.toString());
     }
 
     static byte[] forwardedInitialBytes(InitialRequest initialRequest) {
-        if (initialRequest.isWebSocketUpgrade()) {
+        return forwardedInitialBytes(initialRequest, null);
+    }
+
+    static byte[] forwardedInitialBytes(InitialRequest initialRequest, String targetOverride) {
+        if (initialRequest.isWebSocketUpgrade() && !hasText(targetOverride)) {
             return initialRequest.bytes();
         }
 
         var lines = initialRequest.headerText().split("\\r?\\n");
         var request = new StringBuilder();
-        request.append(lines[0]).append("\r\n");
+        request.append(requestLine(lines[0], targetOverride)).append("\r\n");
+        if (initialRequest.isWebSocketUpgrade()) {
+            Arrays.stream(lines)
+                    .skip(1)
+                    .filter(line -> !line.isBlank())
+                    .forEach(line -> request.append(line).append("\r\n"));
+            request.append("\r\n");
+            return request.toString().getBytes(ISO_8859_1);
+        }
+
         Arrays.stream(lines)
                 .skip(1)
                 .filter(line -> !line.isBlank())
@@ -132,6 +169,18 @@ public final class OpenApiScenarioProxy {
         return request.toString().getBytes(ISO_8859_1);
     }
 
+    private static String requestLine(String originalRequestLine, String targetOverride) {
+        if (!hasText(targetOverride)) {
+            return originalRequestLine;
+        }
+
+        var requestParts = originalRequestLine.split(" ", 3);
+        if (requestParts.length < 3) {
+            return originalRequestLine;
+        }
+        return requestParts[0] + " " + targetOverride + " " + requestParts[2];
+    }
+
     private static ServerSocket serverSocket(int publicPort) throws IOException {
         var serverSocket = new ServerSocket();
         serverSocket.setReuseAddress(true);
@@ -139,7 +188,22 @@ public final class OpenApiScenarioProxy {
         return serverSocket;
     }
 
-    private static Process startMockServer(int mockServerPort) throws IOException {
+    private static List<MockServerRuntime> startMockServers(OpenApiScenarioServiceRegistry registry)
+            throws IOException {
+        var mockServers = new java.util.ArrayList<MockServerRuntime>();
+        try {
+            for (var service : registry.services()) {
+                var port = availablePort();
+                mockServers.add(new MockServerRuntime(service, port, startMockServer(service.specPath(), port)));
+            }
+            return List.copyOf(mockServers);
+        } catch (IOException | RuntimeException e) {
+            stopMockServers(mockServers);
+            throw e;
+        }
+    }
+
+    private static Process startMockServer(Path specPath, int mockServerPort) throws IOException {
         var command = new java.util.ArrayList<String>();
         command.add(javaExecutable());
         command.add("-Dfile.encoding=UTF-8");
@@ -149,31 +213,55 @@ public final class OpenApiScenarioProxy {
         command.add("org.mockserver.cli.Main");
 
         var processBuilder = new ProcessBuilder(command);
-        configureMockServerEnvironment(processBuilder.environment(), mockServerPort);
+        configureMockServerEnvironment(processBuilder.environment(), mockServerPort, specPath);
         processBuilder.inheritIO();
         return processBuilder.start();
     }
 
-    private static void acceptLoop(
+    private static int availablePort() throws IOException {
+        try (var socket = new ServerSocket(0)) {
+            socket.setReuseAddress(true);
+            return socket.getLocalPort();
+        }
+    }
+
+    private static int waitForFirstMockServerExit(List<MockServerRuntime> mockServers) throws InterruptedException {
+        while (true) {
+            for (var mockServer : mockServers) {
+                var process = mockServer.process();
+                if (!process.isAlive()) {
+                    return process.exitValue();
+                }
+            }
+            Thread.sleep(250);
+        }
+    }
+
+    private static Map<String, ServerSocket> serviceServerSockets(OpenApiScenarioServiceRegistry registry)
+            throws IOException {
+        var sockets = new LinkedHashMap<String, ServerSocket>();
+        try {
+            for (var service : registry.services()) {
+                sockets.put(service.id(), serverSocket(service.publicPort()));
+            }
+            return Map.copyOf(sockets);
+        } catch (IOException | RuntimeException e) {
+            sockets.values().forEach(OpenApiScenarioProxy::closeQuietly);
+            throw e;
+        }
+    }
+
+    private static void acceptAdminLoop(
             ServerSocket serverSocket,
             ExecutorService executor,
             Set<Socket> activeSockets,
-            Map<String, OpenApiScenarioDocs.StaticContent> docs,
+            OpenApiScenarioServiceRegistry registry,
             String docsPath,
-            OpenApiScenarioRequestValidator requestValidator,
-            int mockServerPort,
             Shutdown shutdown) {
         while (!shutdown.isStopped()) {
             try {
                 var clientSocket = serverSocket.accept();
-                executor.execute(() -> handleClient(
-                        clientSocket,
-                        activeSockets,
-                        docs,
-                        docsPath,
-                        requestValidator,
-                        mockServerPort,
-                        executor));
+                executor.execute(() -> handleAdminClient(clientSocket, activeSockets, registry, docsPath));
             } catch (SocketException e) {
                 if (!shutdown.isStopped()) {
                     e.printStackTrace(System.err);
@@ -188,13 +276,84 @@ public final class OpenApiScenarioProxy {
         }
     }
 
-    private static void handleClient(
+    private static void acceptServiceLoop(
+            ServerSocket serverSocket,
+            ExecutorService executor,
+            Set<Socket> activeSockets,
+            Map<String, OpenApiScenarioDocs.StaticContent> docs,
+            String docsPath,
+            MockServerRuntime mockServer,
+            Shutdown shutdown) {
+        while (!shutdown.isStopped()) {
+            try {
+                var clientSocket = serverSocket.accept();
+                executor.execute(() ->
+                        handleServiceClient(clientSocket, activeSockets, docs, docsPath, mockServer, executor));
+            } catch (SocketException e) {
+                if (!shutdown.isStopped()) {
+                    e.printStackTrace(System.err);
+                    shutdown.run();
+                }
+                return;
+            } catch (IOException e) {
+                e.printStackTrace(System.err);
+                shutdown.run();
+                return;
+            }
+        }
+    }
+
+    private static void handleAdminClient(
+            Socket clientSocket,
+            Set<Socket> activeSockets,
+            OpenApiScenarioServiceRegistry registry,
+            String docsPath) {
+        activeSockets.add(clientSocket);
+        try (clientSocket) {
+            clientSocket.setTcpNoDelay(true);
+            var initialRequest = readInitialRequest(clientSocket.getInputStream());
+            if (initialRequest == null) {
+                return;
+            }
+
+            if (isIndexRoute(initialRequest.path(), docsPath)) {
+                sendResponse(
+                        clientSocket.getOutputStream(),
+                        initialRequest.method(),
+                        200,
+                        "OK",
+                        "text/html; charset=utf-8",
+                        registry.docsIndexHtml(initialRequest.hostHeader(), docsPath));
+                return;
+            }
+
+            if (isIndexRoute(initialRequest.path(), DASHBOARD_PATH)) {
+                sendResponse(
+                        clientSocket.getOutputStream(),
+                        initialRequest.method(),
+                        200,
+                        "OK",
+                        "text/html; charset=utf-8",
+                        registry.dashboardIndexHtml(initialRequest.hostHeader(), DASHBOARD_PATH));
+                return;
+            }
+
+            sendNotFound(clientSocket.getOutputStream(), initialRequest.method());
+        } catch (IOException e) {
+            if (!isExpectedSocketClose(e)) {
+                e.printStackTrace(System.err);
+            }
+        } finally {
+            activeSockets.remove(clientSocket);
+        }
+    }
+
+    private static void handleServiceClient(
             Socket clientSocket,
             Set<Socket> activeSockets,
             Map<String, OpenApiScenarioDocs.StaticContent> docs,
             String docsPath,
-            OpenApiScenarioRequestValidator requestValidator,
-            int mockServerPort,
+            MockServerRuntime mockServer,
             ExecutorService executor) {
         activeSockets.add(clientSocket);
         try (clientSocket) {
@@ -211,18 +370,43 @@ public final class OpenApiScenarioProxy {
             }
 
             if (isMockServerRoute(initialRequest.path()) || initialRequest.isWebSocketUpgrade()) {
-                tunnelToMockServer(clientSocket, clientInput, initialRequest, new byte[0], mockServerPort, executor);
+                tunnelToMockServer(
+                        clientSocket,
+                        clientInput,
+                        initialRequest,
+                        new byte[0],
+                        mockServer.internalPort(),
+                        null,
+                        executor);
                 return;
             }
 
             var body = readValidatedBody(clientInput, initialRequest);
-            var validationResult = requestValidator.validate(initialRequest, body);
-            if (validationResult.applicable() && !validationResult.isValid()) {
+            var validationResult = mockServer.service().validator().validate(initialRequest, body);
+            if (!validationResult.applicable()) {
+                sendResponse(
+                        clientSocket.getOutputStream(),
+                        initialRequest.method(),
+                        404,
+                        "Not Found",
+                        "application/json; charset=utf-8",
+                        "{\"error\":\"No OpenAPI operation matched request\"}");
+                return;
+            }
+
+            if (!validationResult.isValid()) {
                 sendValidationError(clientSocket.getOutputStream(), initialRequest.method(), validationResult.errors());
                 return;
             }
 
-            tunnelToMockServer(clientSocket, clientInput, initialRequest, body, mockServerPort, executor);
+            tunnelToMockServer(
+                    clientSocket,
+                    clientInput,
+                    initialRequest,
+                    body,
+                    mockServer.internalPort(),
+                    null,
+                    executor);
         } catch (OpenApiScenarioException e) {
             try {
                 sendResponse(
@@ -310,6 +494,10 @@ public final class OpenApiScenarioProxy {
         sendResponse(output, initialRequest.method(), 200, "OK", content.contentType(), content.body());
     }
 
+    private static void sendNotFound(OutputStream output, String method) throws IOException {
+        sendResponse(output, method, 404, "Not Found", "text/plain; charset=utf-8", "Not found.");
+    }
+
     private static void sendValidationError(OutputStream output, String method, List<String> errors)
             throws IOException {
         sendResponse(
@@ -366,12 +554,13 @@ public final class OpenApiScenarioProxy {
             InitialRequest initialRequest,
             byte[] bufferedBody,
             int mockServerPort,
+            String targetOverride,
             ExecutorService executor)
             throws IOException {
         try (var mockServerSocket = new Socket("127.0.0.1", mockServerPort)) {
             mockServerSocket.setTcpNoDelay(true);
             var mockServerOutput = mockServerSocket.getOutputStream();
-            mockServerOutput.write(forwardedInitialBytes(initialRequest));
+            mockServerOutput.write(forwardedInitialBytes(initialRequest, targetOverride));
             mockServerOutput.write(bufferedBody);
             mockServerOutput.flush();
 
@@ -421,6 +610,36 @@ public final class OpenApiScenarioProxy {
         try {
             socket.close();
         } catch (IOException ignored) {
+        }
+    }
+
+    private static void closeQuietly(ServerSocket socket) {
+        try {
+            socket.close();
+        } catch (IOException ignored) {
+        }
+    }
+
+    private static void stopMockServers(List<MockServerRuntime> mockServers) {
+        for (var mockServer : mockServers) {
+            stopMockServer(mockServer.process());
+        }
+    }
+
+    private static void stopMockServer(Process mockServer) {
+        if (!mockServer.isAlive()) {
+            return;
+        }
+
+        mockServer.destroy();
+        try {
+            if (!mockServer.waitFor(MOCKSERVER_SHUTDOWN_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
+                mockServer.destroyForcibly();
+                mockServer.waitFor(MOCKSERVER_FORCE_SHUTDOWN_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            }
+        } catch (InterruptedException e) {
+            mockServer.destroyForcibly();
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -547,6 +766,10 @@ public final class OpenApiScenarioProxy {
                             .anyMatch(value -> value.toLowerCase(Locale.ROOT).contains("upgrade"));
         }
 
+        String hostHeader() {
+            return header("host").stream().findFirst().orElse("localhost");
+        }
+
         private List<String> header(String name) {
             return headers.getOrDefault(name.toLowerCase(Locale.ROOT), List.of());
         }
@@ -583,23 +806,25 @@ public final class OpenApiScenarioProxy {
         }
     }
 
+    private record MockServerRuntime(OpenApiScenarioServiceRegistry.Service service, int internalPort, Process process) {}
+
     private static final class Shutdown implements Runnable {
 
-        private final ServerSocket serverSocket;
+        private final List<ServerSocket> serverSockets;
         private final ExecutorService executor;
         private final Set<Socket> activeSockets;
-        private final Process mockServer;
+        private final List<MockServerRuntime> mockServers;
         private final AtomicBoolean stopped = new AtomicBoolean();
 
         private Shutdown(
-                ServerSocket serverSocket,
+                List<ServerSocket> serverSockets,
                 ExecutorService executor,
                 Set<Socket> activeSockets,
-                Process mockServer) {
-            this.serverSocket = serverSocket;
+                List<MockServerRuntime> mockServers) {
+            this.serverSockets = serverSockets;
             this.executor = executor;
             this.activeSockets = activeSockets;
-            this.mockServer = mockServer;
+            this.mockServers = mockServers;
         }
 
         boolean isStopped() {
@@ -612,30 +837,10 @@ public final class OpenApiScenarioProxy {
                 return;
             }
 
-            try {
-                serverSocket.close();
-            } catch (IOException ignored) {
-            }
+            serverSockets.forEach(OpenApiScenarioProxy::closeQuietly);
             activeSockets.forEach(OpenApiScenarioProxy::closeQuietly);
-            stopMockServer();
+            stopMockServers(mockServers);
             executor.shutdownNow();
-        }
-
-        private void stopMockServer() {
-            if (!mockServer.isAlive()) {
-                return;
-            }
-
-            mockServer.destroy();
-            try {
-                if (!mockServer.waitFor(MOCKSERVER_SHUTDOWN_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
-                    mockServer.destroyForcibly();
-                    mockServer.waitFor(MOCKSERVER_FORCE_SHUTDOWN_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-                }
-            } catch (InterruptedException e) {
-                mockServer.destroyForcibly();
-                Thread.currentThread().interrupt();
-            }
         }
     }
 }

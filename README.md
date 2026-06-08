@@ -81,69 +81,116 @@ The shaded jar includes this extension's runtime dependencies but excludes MockS
 
 ## Docker Usage
 
-Use the prebuilt GHCR image and point the initializer at an OpenAPI file:
+Use the prebuilt GHCR image and mount one or more OpenAPI specs into `/config/openapi`.
+Every `.yaml` and `.yml` file in that directory becomes a named mock service. The service
+name is derived from the filename, so `accertify.yaml` becomes `accertify`.
 
 ```yaml
 services:
   mockserver:
     image: ghcr.io/bilal-fazlani/mockserver-openapi-scenario-extension:<version>
     ports:
-      - "1080:1080"
+      - "1080:1080" # docs and dashboard indexes
+      - "1081:1081" # accertify
+      - "1082:1082" # worldpay
     environment:
-      MOCKSERVER_OPENAPI_SCENARIOS_SPEC: /config/openapi/api.yaml
+      MOCKSERVER_OPENAPI_SCENARIOS_SPEC_DIR: /config/openapi
+      MOCKSERVER_OPENAPI_SCENARIOS_SERVICE_PORTS: accertify=1081,worldpay=1082
     volumes:
-      - ./api.yaml:/config/openapi/api.yaml:ro
+      - ./mock-contracts:/config/openapi:ro
 ```
 
-The Docker image also serves a Swagger UI based documentation page at:
+The Docker image serves a documentation index on the admin port:
 
 ```text
 http://localhost:1080/mockserver/openapi/docs
 ```
 
-That page reads the same OpenAPI document, expands the usual Swagger request and response documentation, and renders `x-mockserver-scenarios` beside each operation. The renderer summarizes known matcher shapes, such as body JSONPath matchers, without duplicating MockServer's matching engine in the browser.
+Each service port is self-contained. For example, if `accertify.yaml` is mapped to port
+`1081`, Accertify is available at:
 
-The docs UI is served by the Docker image before requests are proxied to MockServer, so MockServer's dashboard only shows API expectations generated from `x-mockserver-scenarios`.
+```text
+http://localhost:1081/{path-defined-by-accertify.yaml}
+http://localhost:1081/mockserver/openapi/docs
+http://localhost:1081/mockserver/dashboard
+```
 
-The Docker image also validates incoming JSON request bodies for known OpenAPI operations before proxying to MockServer. If the request body does not match the operation's OpenAPI request schema, the proxy returns `400 Bad Request` with validation messages. Unknown paths and MockServer control/dashboard routes are still proxied to MockServer normally.
+The service Swagger UI reads the same OpenAPI document used to create expectations,
+expands the usual Swagger request and response documentation, and renders
+`x-mockserver-scenarios` beside each operation. The renderer summarizes known matcher
+shapes, such as body JSONPath matchers, without duplicating MockServer's matching engine
+in the browser.
+
+The Docker image also serves a dashboard index on the admin port:
+
+```text
+http://localhost:1080/mockserver/dashboard
+```
+
+Service dashboards live on their own service ports. A service dashboard shows only the
+expectations generated for that service.
+
+The Docker image validates incoming JSON request bodies for known OpenAPI operations before
+proxying to MockServer. If the request body does not match the operation's OpenAPI request
+schema, the proxy returns `400 Bad Request` with validation messages. If no OpenAPI
+operation matches on that service port, the proxy returns `404 Not Found`. Dashboard and
+docs routes bypass API schema validation.
 
 ```mermaid
 flowchart TD
-    A["Incoming HTTP request"] --> B{"Docs route?<br/>/mockserver/openapi/docs"}
+    A["Incoming HTTP request"] --> B{"Admin port?<br/>1080"}
 
-    B -- yes --> C["Serve Swagger UI / OpenAPI assets<br/>from proxy"]
-    B -- no --> D{"MockServer route?<br/>/mockserver/... or /_mockserver..."}
+    B -- yes --> C{"Index route?"}
+    C -- "Docs index" --> D["Render links to<br/>service docs ports"]
+    C -- "Dashboard index" --> E["Render links to<br/>service dashboard ports"]
+    C -- "Anything else" --> F["Return 404 Not Found"]
 
-    D -- yes --> E["Bypass validation"]
-    E --> F["Proxy request to internal MockServer"]
+    B -- no --> G["Service port<br/>1081, 1082, ..."]
+    G --> H{"Docs route?<br/>/mockserver/openapi/docs"}
 
-    D -- no --> G["Read request body<br/>using Content-Length"]
-    G --> H["Find matching OpenAPI operation<br/>by method + path"]
+    H -- yes --> I["Serve that service's<br/>Swagger UI from proxy"]
+    H -- no --> J{"MockServer dashboard/control route?<br/>/mockserver/..."}
 
-    H -- "No matching operation" --> F
-    H -- "Matching operation found" --> I["Validate JSON body against<br/>operation requestBody schema"]
+    J -- yes --> K["Proxy to that service's<br/>internal MockServer"]
+    J -- no --> L["Read request body<br/>using Content-Length"]
 
-    I -- valid --> F
-    I -- invalid --> J["Return 400 Bad Request<br/>with validation messages"]
+    L --> M["Validate against that service's<br/>OpenAPI operation"]
 
-    F --> K["MockServer expectation matching<br/>x-mockserver-scenarios"]
-    K --> L["Return configured response"]
+    M -- "No matching operation" --> N["Return 404 Not Found"]
+    M -- invalid --> O["Return 400 Bad Request<br/>with validation messages"]
+    M -- valid --> K
+
+    K --> P["MockServer expectation matching<br/>x-mockserver-scenarios"]
+    P --> Q["Return configured response"]
 ```
 
-The spec path can also be provided as a Java system property:
+The spec directory can also be provided as a Java system property:
 
 ```text
-mockserver.openapi.scenarios.spec=/config/openapi/api.yaml
+mockserver.openapi.scenarios.spec.dir=/config/openapi
+```
+
+Service ports are assigned by sorted filename starting at `1081` if
+`MOCKSERVER_OPENAPI_SCENARIOS_SERVICE_PORTS` is not set. For stable local and CI
+configuration, set explicit mappings:
+
+```text
+MOCKSERVER_OPENAPI_SCENARIOS_SERVICE_PORTS=accertify=1081,worldpay=1082
+```
+
+The same value can be provided as a Java system property:
+
+```text
+mockserver.openapi.scenarios.service.ports=accertify=1081,worldpay=1082
 ```
 
 Docs settings:
 
 ```text
 MOCKSERVER_OPENAPI_SCENARIOS_DOCS_PATH=/mockserver/openapi/docs
-MOCKSERVER_OPENAPI_SCENARIOS_MOCKSERVER_PORT=1081
 ```
 
-The published Docker image enables the docs UI by default. `MOCKSERVER_OPENAPI_SCENARIOS_MOCKSERVER_PORT` is the internal child MockServer port inside the container; most consumers should leave it at the default.
+The published Docker image enables the docs UI by default.
 
 The Docker image defaults MockServer logging to `WARN`. Set `MOCKSERVER_LOG_LEVEL=INFO` when you want MockServer's detailed request and expectation logs.
 
@@ -157,9 +204,11 @@ FROM mockserver/mockserver:7.0.0
 COPY build/libs/mockserver-openapi-scenario-extension-all.jar /libs/mockserver-openapi-scenario-extension.jar
 
 ENV MOCKSERVER_INITIALIZATION_CLASS=com.bilal_fazlani.mockserver.openapi.scenario.OpenApiScenarioInitializer
+ENV MOCKSERVER_OPENAPI_SCENARIOS_SPEC_DIR=/config/openapi
 ENV MOCKSERVER_OPENAPI_SCENARIOS_DOCS_PATH=/mockserver/openapi/docs
-ENV MOCKSERVER_OPENAPI_SCENARIOS_MOCKSERVER_PORT=1081
 ENV MOCKSERVER_LOG_LEVEL=WARN
+
+HEALTHCHECK NONE
 
 ENTRYPOINT ["java", "-Dfile.encoding=UTF-8", "-cp", "/mockserver-netty-jar-with-dependencies.jar:/libs/*", "-Dmockserver.propertyFile=/config/mockserver.properties", "com.bilal_fazlani.mockserver.openapi.scenario.OpenApiScenarioProxy"]
 ```

@@ -1,0 +1,19 @@
+openapi: 3.0.3
+info:
+  title: Beta
+  version: 1.0.0
+paths:
+  /shared/{otherId}:
+    get:
+      operationId: getBeta
+      responses:
+        "200":
+          description: Beta response
+          content:
+            application/json:
+              examples:
+                ok:
+                  value:
+                    source: beta
+      x-mockserver-scenarios:
+        - response: ok
