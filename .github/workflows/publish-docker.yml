@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, without the leading v"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -27,10 +33,18 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build runtime jar
+      - name: Resolve version
+        id: version
         run: |
-          VERSION_NAME="${GITHUB_REF_NAME#v}"
-          ./gradlew test runtimeJar -PVERSION_NAME="${VERSION_NAME}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            VERSION_NAME="${{ inputs.version }}"
+          else
+            VERSION_NAME="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=${VERSION_NAME}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build runtime jar
+        run: ./gradlew test runtimeJar -PVERSION_NAME="${{ steps.version.outputs.version }}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -48,8 +62,8 @@ jobs:
         with:
           images: ghcr.io/bilal-fazlani/mockserver-openapi-scenario-extension
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=v${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ steps.version.outputs.version }}
             type=raw,value=latest
 
       - name: Build and push
