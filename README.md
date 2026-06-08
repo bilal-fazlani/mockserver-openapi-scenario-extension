@@ -86,7 +86,7 @@ Use the prebuilt GHCR image and point the initializer at an OpenAPI file:
 ```yaml
 services:
   mockserver:
-    image: ghcr.io/bilal-fazlani/mockserver-openapi-scenario-extension:0.0.1
+    image: ghcr.io/bilal-fazlani/mockserver-openapi-scenario-extension:<version>
     ports:
       - "1080:1080"
     environment:
@@ -95,11 +95,30 @@ services:
       - ./api.yaml:/config/openapi/api.yaml:ro
 ```
 
+The Docker image also serves a Swagger UI based documentation page at:
+
+```text
+http://localhost:1080/mockserver/openapi/docs
+```
+
+That page reads the same OpenAPI document from MockServer, expands the usual Swagger request and response documentation, and renders `x-mockserver-scenarios` beside each operation. The renderer summarizes known matcher shapes, such as body JSONPath matchers, without duplicating MockServer's matching engine in the browser.
+
 The spec path can also be provided as a Java system property:
 
 ```text
 mockserver.openapi.scenarios.spec=/config/openapi/api.yaml
 ```
+
+Docs settings:
+
+```text
+MOCKSERVER_OPENAPI_SCENARIOS_DOCS_ENABLED=true
+MOCKSERVER_OPENAPI_SCENARIOS_DOCS_PATH=/mockserver/openapi/docs
+```
+
+The published Docker image enables the docs UI by default. Library users who wire the initializer into another MockServer setup must opt in with `mockserver.openapi.scenarios.docs.enabled=true` or `MOCKSERVER_OPENAPI_SCENARIOS_DOCS_ENABLED=true`.
+
+The Docker image defaults MockServer logging to `WARN` because Swagger UI assets are served through MockServer and INFO logs can include large response bodies. Set `MOCKSERVER_LOG_LEVEL=INFO` when you want MockServer's detailed request and expectation logs.
 
 ### Custom MockServer Image
 
@@ -111,6 +130,9 @@ FROM mockserver/mockserver:7.0.0
 COPY build/libs/mockserver-openapi-scenario-extension-all.jar /libs/mockserver-openapi-scenario-extension.jar
 
 ENV MOCKSERVER_INITIALIZATION_CLASS=com.bilal_fazlani.mockserver.openapi.scenario.OpenApiScenarioInitializer
+ENV MOCKSERVER_OPENAPI_SCENARIOS_DOCS_ENABLED=true
+ENV MOCKSERVER_OPENAPI_SCENARIOS_DOCS_PATH=/mockserver/openapi/docs
+ENV MOCKSERVER_LOG_LEVEL=WARN
 ```
 
 ## Development

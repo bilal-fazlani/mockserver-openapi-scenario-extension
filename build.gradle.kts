@@ -8,6 +8,7 @@ version = providers.gradleProperty("VERSION_NAME").orElse("0.1.0-SNAPSHOT").get(
 
 val mockServerVersion = "7.0.0"
 val jacksonVersion = "2.20.0"
+val swaggerUiVersion = "5.32.4"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -23,6 +24,7 @@ dependencies {
 
     implementation("com.fasterxml.jackson.core:jackson-databind:$jacksonVersion")
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:$jacksonVersion")
+    implementation("org.webjars.npm:swagger-ui-dist:$swaggerUiVersion")
 
     testImplementation(platform("org.junit:junit-bom:6.0.1"))
     testImplementation("org.junit.jupiter:junit-jupiter")

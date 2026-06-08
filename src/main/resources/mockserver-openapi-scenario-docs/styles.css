@@ -1,0 +1,35 @@
+body {
+  margin: 0;
+  background: #f7f8fa;
+}
+
+.mockserver-scenarios-panel {
+  margin: 14px 20px 22px;
+  padding: 12px 14px;
+  border: 1px solid #d8dde7;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #20242c;
+  font-family: sans-serif;
+  font-size: 14px;
+  overflow-x: auto;
+}
+
+.mockserver-scenario-row {
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.mockserver-scenario-row + .mockserver-scenario-row {
+  margin-top: 8px;
+}
+
+.mockserver-scenario-response {
+  font-weight: 700;
+}
+
+.mockserver-scenario-expression,
+.mockserver-scenario-arrow,
+.mockserver-scenario-empty {
+  color: #4f5b6b;
+}

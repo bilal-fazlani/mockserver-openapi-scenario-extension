@@ -1,0 +1,40 @@
+openapi: 3.0.3
+info:
+  title: Docs Scenario API
+  version: 1.0.0
+paths:
+  /v1/fraud/assessment:
+    post:
+      operationId: assessFraud
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+      responses:
+        "200":
+          description: Fraud assessment response
+          content:
+            application/json:
+              examples:
+                accept:
+                  value:
+                    status: ACCEPT
+                    score: 42
+                reject:
+                  value:
+                    status: REJECT
+                    reason: High risk transaction
+      x-mockserver-scenarios:
+        - matcher:
+            body:
+              type: JSON_PATH
+              jsonPath: "$[?(@.email =~ /.*reject.*/i)]"
+          response: reject
+        - response: accept

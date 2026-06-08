@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenAPI Scenario Docs</title>
+  <link rel="stylesheet" href="{{docsPath}}/swagger-ui.css">
+  <link rel="stylesheet" href="{{docsPath}}/styles.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="{{docsPath}}/swagger-ui-bundle.js"></script>
+  <script src="{{docsPath}}/swagger-ui-standalone-preset.js"></script>
+  <script src="{{docsPath}}/scenarios.js"></script>
+  <script>
+    window.onload = function() {
+      window.ui = SwaggerUIBundle({
+        url: {{openApiUrlJson}},
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        docExpansion: "full",
+        defaultModelExpandDepth: 2,
+        defaultModelsExpandDepth: 2,
+        displayOperationId: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIStandalonePreset
+        ],
+        plugins: [
+          SwaggerUIBundle.plugins.DownloadUrl,
+          MockServerOpenApiScenarios
+        ],
+        layout: "StandaloneLayout"
+      });
+    };
+  </script>
+</body>
+</html>
