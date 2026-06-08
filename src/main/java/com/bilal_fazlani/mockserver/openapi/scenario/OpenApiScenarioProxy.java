@@ -25,6 +25,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /**
  * Docker entry point that serves documentation outside MockServer and proxies API traffic to
@@ -42,6 +43,7 @@ public final class OpenApiScenarioProxy {
     private static final int DEFAULT_PUBLIC_PORT = 1080;
     private static final int DEFAULT_INTERNAL_MOCKSERVER_PORT = 1081;
     private static final int MAX_INITIAL_REQUEST_BYTES = 64 * 1024;
+    private static final int MAX_VALIDATED_BODY_BYTES = 10 * 1024 * 1024;
     private static final Duration MOCKSERVER_SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration MOCKSERVER_FORCE_SHUTDOWN_TIMEOUT = Duration.ofSeconds(5);
     private static final Set<String> CONNECTION_HEADERS = Set.of("connection", "keep-alive", "proxy-connection");
@@ -61,6 +63,7 @@ public final class OpenApiScenarioProxy {
         var mockServerPort = configuredInt(INTERNAL_MOCKSERVER_PORT_ENV, DEFAULT_INTERNAL_MOCKSERVER_PORT);
 
         var docs = docsByPath(new OpenApiScenarioDocs().content(specPath, docsPath));
+        var requestValidator = new OpenApiScenarioRequestValidator(specPath);
         var serverSocket = serverSocket(publicPort);
         var mockServer = startMockServer(mockServerPort);
         var executor = Executors.newCachedThreadPool();
@@ -73,8 +76,15 @@ public final class OpenApiScenarioProxy {
             System.out.printf(
                     "Serving OpenAPI scenario docs at %s and proxying MockServer on port %d.%n",
                     docsPath, publicPort);
-            executor.execute(() ->
-                    acceptLoop(serverSocket, executor, activeSockets, docs, docsPath, mockServerPort, shutdown));
+            executor.execute(() -> acceptLoop(
+                    serverSocket,
+                    executor,
+                    activeSockets,
+                    docs,
+                    docsPath,
+                    requestValidator,
+                    mockServerPort,
+                    shutdown));
             exitCode = mockServer.waitFor();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -92,6 +102,12 @@ public final class OpenApiScenarioProxy {
         var normalizedDocsPath = normalizedDocsPath(docsPath);
         return requestPath.equals(normalizedDocsPath)
                 || requestPath.startsWith(normalizedDocsPath + "/");
+    }
+
+    static boolean isMockServerRoute(String requestPath) {
+        return requestPath.equals("/mockserver")
+                || requestPath.startsWith("/mockserver/")
+                || requestPath.startsWith("/_mockserver");
     }
 
     static void configureMockServerEnvironment(Map<String, String> environment, int mockServerPort) {
@@ -144,12 +160,20 @@ public final class OpenApiScenarioProxy {
             Set<Socket> activeSockets,
             Map<String, OpenApiScenarioDocs.StaticContent> docs,
             String docsPath,
+            OpenApiScenarioRequestValidator requestValidator,
             int mockServerPort,
             Shutdown shutdown) {
         while (!shutdown.isStopped()) {
             try {
                 var clientSocket = serverSocket.accept();
-                executor.execute(() -> handleClient(clientSocket, activeSockets, docs, docsPath, mockServerPort, executor));
+                executor.execute(() -> handleClient(
+                        clientSocket,
+                        activeSockets,
+                        docs,
+                        docsPath,
+                        requestValidator,
+                        mockServerPort,
+                        executor));
             } catch (SocketException e) {
                 if (!shutdown.isStopped()) {
                     e.printStackTrace(System.err);
@@ -169,12 +193,14 @@ public final class OpenApiScenarioProxy {
             Set<Socket> activeSockets,
             Map<String, OpenApiScenarioDocs.StaticContent> docs,
             String docsPath,
+            OpenApiScenarioRequestValidator requestValidator,
             int mockServerPort,
             ExecutorService executor) {
         activeSockets.add(clientSocket);
         try (clientSocket) {
             clientSocket.setTcpNoDelay(true);
-            var initialRequest = readInitialRequest(clientSocket.getInputStream());
+            var clientInput = clientSocket.getInputStream();
+            var initialRequest = readInitialRequest(clientInput);
             if (initialRequest == null) {
                 return;
             }
@@ -184,7 +210,30 @@ public final class OpenApiScenarioProxy {
                 return;
             }
 
-            tunnelToMockServer(clientSocket, initialRequest, mockServerPort, executor);
+            if (isMockServerRoute(initialRequest.path()) || initialRequest.isWebSocketUpgrade()) {
+                tunnelToMockServer(clientSocket, clientInput, initialRequest, new byte[0], mockServerPort, executor);
+                return;
+            }
+
+            var body = readValidatedBody(clientInput, initialRequest);
+            var validationResult = requestValidator.validate(initialRequest, body);
+            if (validationResult.applicable() && !validationResult.isValid()) {
+                sendValidationError(clientSocket.getOutputStream(), initialRequest.method(), validationResult.errors());
+                return;
+            }
+
+            tunnelToMockServer(clientSocket, clientInput, initialRequest, body, mockServerPort, executor);
+        } catch (OpenApiScenarioException e) {
+            try {
+                sendResponse(
+                        clientSocket.getOutputStream(),
+                        "GET",
+                        400,
+                        "Bad Request",
+                        "application/json; charset=utf-8",
+                        validationErrorBody(List.of(e.getMessage())));
+            } catch (IOException ignored) {
+            }
         } catch (IOException e) {
             if (!isExpectedSocketClose(e)) {
                 e.printStackTrace(System.err);
@@ -223,6 +272,24 @@ public final class OpenApiScenarioProxy {
                 "HTTP request headers exceeded " + MAX_INITIAL_REQUEST_BYTES + " bytes.");
     }
 
+    private static byte[] readValidatedBody(InputStream input, InitialRequest initialRequest) throws IOException {
+        var contentLength = initialRequest.contentLength();
+        if (contentLength == 0) {
+            return new byte[0];
+        }
+        if (contentLength > MAX_VALIDATED_BODY_BYTES) {
+            throw new OpenApiScenarioException(
+                    "HTTP request body exceeded " + MAX_VALIDATED_BODY_BYTES + " bytes.");
+        }
+
+        var body = input.readNBytes((int) contentLength);
+        if (body.length != contentLength) {
+            throw new OpenApiScenarioException(
+                    "HTTP request body ended before Content-Length bytes were received.");
+        }
+        return body;
+    }
+
     private static void serveDocs(
             OutputStream output,
             InitialRequest initialRequest,
@@ -241,6 +308,35 @@ public final class OpenApiScenarioProxy {
         }
 
         sendResponse(output, initialRequest.method(), 200, "OK", content.contentType(), content.body());
+    }
+
+    private static void sendValidationError(OutputStream output, String method, List<String> errors)
+            throws IOException {
+        sendResponse(
+                output,
+                method,
+                400,
+                "Bad Request",
+                "application/json; charset=utf-8",
+                validationErrorBody(errors));
+    }
+
+    private static String validationErrorBody(List<String> errors) {
+        var messages = errors.stream()
+                .map(OpenApiScenarioProxy::jsonString)
+                .collect(Collectors.joining(","));
+        return "{\"error\":\"OpenAPI request validation failed\",\"messages\":["
+                + messages
+                + "]}";
+    }
+
+    private static String jsonString(String value) {
+        return "\""
+                + value.replace("\\", "\\\\")
+                        .replace("\"", "\\\"")
+                        .replace("\n", "\\n")
+                        .replace("\r", "\\r")
+                + "\"";
     }
 
     private static void sendResponse(
@@ -265,13 +361,18 @@ public final class OpenApiScenarioProxy {
     }
 
     private static void tunnelToMockServer(
-            Socket clientSocket, InitialRequest initialRequest, int mockServerPort, ExecutorService executor)
+            Socket clientSocket,
+            InputStream clientInput,
+            InitialRequest initialRequest,
+            byte[] bufferedBody,
+            int mockServerPort,
+            ExecutorService executor)
             throws IOException {
         try (var mockServerSocket = new Socket("127.0.0.1", mockServerPort)) {
             mockServerSocket.setTcpNoDelay(true);
-            var clientInput = clientSocket.getInputStream();
             var mockServerOutput = mockServerSocket.getOutputStream();
             mockServerOutput.write(forwardedInitialBytes(initialRequest));
+            mockServerOutput.write(bufferedBody);
             mockServerOutput.flush();
 
             var clientToMockServer = executor.submit(() -> copy(clientInput, mockServerOutput));
@@ -448,6 +549,23 @@ public final class OpenApiScenarioProxy {
 
         private List<String> header(String name) {
             return headers.getOrDefault(name.toLowerCase(Locale.ROOT), List.of());
+        }
+
+        private int contentLength() {
+            var values = header("content-length");
+            if (values.isEmpty()) {
+                return 0;
+            }
+
+            try {
+                var contentLength = Integer.parseInt(values.get(0));
+                if (contentLength < 0) {
+                    throw new OpenApiScenarioException("Content-Length must not be negative.");
+                }
+                return contentLength;
+            } catch (NumberFormatException e) {
+                throw new OpenApiScenarioException("Invalid Content-Length header: " + values.get(0), e);
+            }
         }
 
         private static String pathFromTarget(String target) {

@@ -105,6 +105,8 @@ That page reads the same OpenAPI document, expands the usual Swagger request and
 
 The docs UI is served by the Docker image before requests are proxied to MockServer, so MockServer's dashboard only shows API expectations generated from `x-mockserver-scenarios`.
 
+The Docker image also validates incoming JSON request bodies for known OpenAPI operations before proxying to MockServer. If the request body does not match the operation's OpenAPI request schema, the proxy returns `400 Bad Request` with validation messages. Unknown paths and MockServer control/dashboard routes are still proxied to MockServer normally.
+
 The spec path can also be provided as a Java system property:
 
 ```text

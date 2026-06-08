@@ -26,6 +26,15 @@ class OpenApiScenarioProxyTest {
     }
 
     @Test
+    void treatsMockServerControlAndDashboardPathsAsMockServerRoutes() {
+        assertThat(OpenApiScenarioProxy.isMockServerRoute("/mockserver")).isTrue();
+        assertThat(OpenApiScenarioProxy.isMockServerRoute("/mockserver/dashboard")).isTrue();
+        assertThat(OpenApiScenarioProxy.isMockServerRoute("/mockserver/retrieve")).isTrue();
+        assertThat(OpenApiScenarioProxy.isMockServerRoute("/_mockserver_ui_websocket")).isTrue();
+        assertThat(OpenApiScenarioProxy.isMockServerRoute("/v1/fraud/assessment")).isFalse();
+    }
+
+    @Test
     void configuresChildMockServerOnInternalPortWithoutDocsExpectations() {
         var environment = new HashMap<String, String>();
         environment.put("SERVER_PORT", "1080");
