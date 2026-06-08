@@ -107,6 +107,29 @@ The docs UI is served by the Docker image before requests are proxied to MockSer
 
 The Docker image also validates incoming JSON request bodies for known OpenAPI operations before proxying to MockServer. If the request body does not match the operation's OpenAPI request schema, the proxy returns `400 Bad Request` with validation messages. Unknown paths and MockServer control/dashboard routes are still proxied to MockServer normally.
 
+```mermaid
+flowchart TD
+    A["Incoming HTTP request"] --> B{"Docs route?<br/>/mockserver/openapi/docs"}
+
+    B -- yes --> C["Serve Swagger UI / OpenAPI assets<br/>from proxy"]
+    B -- no --> D{"MockServer route?<br/>/mockserver/... or /_mockserver..."}
+
+    D -- yes --> E["Bypass validation"]
+    E --> F["Proxy request to internal MockServer"]
+
+    D -- no --> G["Read request body<br/>using Content-Length"]
+    G --> H["Find matching OpenAPI operation<br/>by method + path"]
+
+    H -- "No matching operation" --> F
+    H -- "Matching operation found" --> I["Validate JSON body against<br/>operation requestBody schema"]
+
+    I -- valid --> F
+    I -- invalid --> J["Return 400 Bad Request<br/>with validation messages"]
+
+    F --> K["MockServer expectation matching<br/>x-mockserver-scenarios"]
+    K --> L["Return configured response"]
+```
+
 The spec path can also be provided as a Java system property:
 
 ```text
