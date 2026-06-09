@@ -89,52 +89,73 @@ class OpenApiScenarioServiceRegistryTest {
     void buildsCentralDocsIndexWithLinksToServicePorts() {
         var registry = OpenApiScenarioServiceRegistry.load(Path.of("src/test/resources/multi-specs"));
 
-        var html = registry.docsIndexHtml("localhost:1080", "/mockserver/openapi/docs");
+        var html = registry.docsIndexHtml("localhost:1080", "/openapi/docs");
 
         assertThat(html)
-                .contains("http://localhost:1081/mockserver/openapi/docs")
-                .contains("http://localhost:1082/mockserver/openapi/docs")
+                .contains("http://localhost:1081/openapi/docs")
+                .contains("http://localhost:1082/openapi/docs")
                 .contains("port 1081")
                 .contains("port 1082")
-                .contains("/mockserver/openapi/docs/styles.css")
+                .contains("/openapi/docs/styles.css")
+                .contains("href=\"/\"")
+                .contains("Home")
                 .doesNotContain("<style>")
-                .doesNotContain("/mockserver/openapi/docs/accertify")
-                .doesNotContain("/mockserver/openapi/docs/worldpay");
+                .doesNotContain("/openapi/docs/accertify")
+                .doesNotContain("/openapi/docs/worldpay");
     }
 
     @Test
     void buildsCentralDashboardIndexWithLinksToServicePorts() {
         var registry = OpenApiScenarioServiceRegistry.load(Path.of("src/test/resources/multi-specs"));
 
-        var html = registry.dashboardIndexHtml("localhost:1080", "/mockserver/dashboard");
+        var html = registry.dashboardIndexHtml("localhost:1080", "/dashboard");
 
         assertThat(html)
-                .contains("http://localhost:1081/mockserver/dashboard")
-                .contains("http://localhost:1082/mockserver/dashboard")
+                .contains("http://localhost:1081/dashboard")
+                .contains("http://localhost:1082/dashboard")
                 .contains("port 1081")
                 .contains("port 1082")
-                .contains("/mockserver/dashboard/styles.css")
+                .contains("/dashboard/styles.css")
+                .contains("href=\"/\"")
+                .contains("Home")
                 .doesNotContain("<style>")
-                .doesNotContain("/mockserver/dashboard/accertify")
-                .doesNotContain("/mockserver/dashboard/worldpay");
+                .doesNotContain("/dashboard/accertify")
+                .doesNotContain("/dashboard/worldpay");
+    }
+
+    @Test
+    void buildsRootIndexWithDashboardAndDocsLinks() {
+        var registry = OpenApiScenarioServiceRegistry.load(Path.of("src/test/resources/multi-specs"));
+
+        var html = registry.rootIndexHtml("/dashboard", "/openapi/docs");
+
+        assertThat(html)
+                .contains("Dashboard")
+                .contains("OpenAPI UI")
+                .contains("href=\"/dashboard\"")
+                .contains("href=\"/openapi/docs\"")
+                .contains("mockserver-icon.png")
+                .contains("swagger-svgrepo-com.svg")
+                .contains("/styles.css")
+                .doesNotContain("port 1081")
+                .doesNotContain("accertify");
     }
 
     @Test
     void buildsServiceDocsContentAtStandardDocsPath() {
         var registry = OpenApiScenarioServiceRegistry.load(Path.of("src/test/resources/multi-specs"));
 
-        var docs = registry.docsContent(
-                registry.service("accertify").orElseThrow(), "/mockserver/openapi/docs");
+        var docs = registry.docsContent(registry.service("accertify").orElseThrow(), "/openapi/docs");
 
         assertThat(docs)
                 .extracting(OpenApiScenarioDocs.StaticContent::path)
                 .contains(
-                        "/mockserver/openapi/docs",
-                        "/mockserver/openapi/docs/openapi.yaml",
-                        "/mockserver/openapi/docs/scenarios.js");
+                        "/openapi/docs",
+                        "/openapi/docs/openapi.yaml",
+                        "/openapi/docs/scenarios.js");
         assertThat(docs)
                 .extracting(OpenApiScenarioDocs.StaticContent::path)
-                .doesNotContain("/mockserver/openapi/docs/accertify");
+                .doesNotContain("/openapi/docs/accertify");
     }
 
     private static OpenApiScenarioProxy.InitialRequest request(String text) {

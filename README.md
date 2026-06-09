@@ -90,7 +90,7 @@ services:
   mockserver:
     image: ghcr.io/bilal-fazlani/mockserver-openapi-scenario-extension:<version>
     ports:
-      - "1080:1080" # docs and dashboard indexes
+      - "1080:1080" # admin portal, docs index, and dashboard index
       - "1081:1081" # accertify
       - "1082:1082" # worldpay
     environment:
@@ -100,10 +100,17 @@ services:
       - ./mock-contracts:/config/openapi:ro
 ```
 
-The Docker image serves a documentation index on the admin port:
+The Docker image serves an admin portal on the main port:
 
 ```text
-http://localhost:1080/mockserver/openapi/docs
+http://localhost:1080/
+```
+
+The portal links to:
+
+```text
+http://localhost:1080/dashboard
+http://localhost:1080/openapi/docs
 ```
 
 Each service port is self-contained. For example, if `accertify.yaml` is mapped to port
@@ -111,8 +118,8 @@ Each service port is self-contained. For example, if `accertify.yaml` is mapped 
 
 ```text
 http://localhost:1081/{path-defined-by-accertify.yaml}
-http://localhost:1081/mockserver/openapi/docs
-http://localhost:1081/mockserver/dashboard
+http://localhost:1081/openapi/docs
+http://localhost:1081/dashboard
 ```
 
 The service Swagger UI reads the same OpenAPI document used to create expectations,
@@ -124,7 +131,7 @@ in the browser.
 The Docker image also serves a dashboard index on the admin port:
 
 ```text
-http://localhost:1080/mockserver/dashboard
+http://localhost:1080/dashboard
 ```
 
 Service dashboards live on their own service ports. A service dashboard shows only the
@@ -141,15 +148,16 @@ flowchart TD
     A["Incoming HTTP request"] --> B{"Admin port?<br/>1080"}
 
     B -- yes --> C{"Index route?"}
-    C -- "Docs index" --> D["Render links to<br/>service docs ports"]
-    C -- "Dashboard index" --> E["Render links to<br/>service dashboard ports"]
-    C -- "Anything else" --> F["Return 404 Not Found"]
+    C -- "Root portal<br/>/" --> D["Render Dashboard and<br/>OpenAPI UI links"]
+    C -- "Docs index<br/>/openapi/docs" --> E["Render links to<br/>service docs ports"]
+    C -- "Dashboard index<br/>/dashboard" --> F["Render links to<br/>service dashboard ports"]
+    C -- "Anything else" --> Z["Return 404 Not Found"]
 
     B -- no --> G["Service port<br/>1081, 1082, ..."]
-    G --> H{"Docs route?<br/>/mockserver/openapi/docs"}
+    G --> H{"Docs route?<br/>/openapi/docs"}
 
     H -- yes --> I["Serve that service's<br/>Swagger UI from proxy"]
-    H -- no --> J{"MockServer dashboard/control route?<br/>/mockserver/..."}
+    H -- no --> J{"Dashboard/control route?<br/>/dashboard or /mockserver/..."}
 
     J -- yes --> K["Proxy to that service's<br/>internal MockServer"]
     J -- no --> L["Read request body<br/>using Content-Length"]
@@ -187,7 +195,7 @@ mockserver.openapi.scenarios.service.ports=accertify=1081,worldpay=1082
 Docs settings:
 
 ```text
-MOCKSERVER_OPENAPI_SCENARIOS_DOCS_PATH=/mockserver/openapi/docs
+MOCKSERVER_OPENAPI_SCENARIOS_DOCS_PATH=/openapi/docs
 ```
 
 The published Docker image enables the docs UI by default.
@@ -205,7 +213,7 @@ COPY build/libs/mockserver-openapi-scenario-extension-all.jar /libs/mockserver-o
 
 ENV MOCKSERVER_INITIALIZATION_CLASS=com.bilal_fazlani.mockserver.openapi.scenario.OpenApiScenarioInitializer
 ENV MOCKSERVER_OPENAPI_SCENARIOS_SPEC_DIR=/config/openapi
-ENV MOCKSERVER_OPENAPI_SCENARIOS_DOCS_PATH=/mockserver/openapi/docs
+ENV MOCKSERVER_OPENAPI_SCENARIOS_DOCS_PATH=/openapi/docs
 ENV MOCKSERVER_LOG_LEVEL=WARN
 
 HEALTHCHECK NONE

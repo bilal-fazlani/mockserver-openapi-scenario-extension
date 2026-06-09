@@ -83,6 +83,7 @@ final class OpenApiScenarioServiceRegistry {
         return indexHtml(
                 "OpenAPI Scenario Docs",
                 normalizedDocsPath + "/styles.css",
+                homeLink("/"),
                 services.stream()
                         .map(service -> new IndexLink(
                                 service.id(),
@@ -100,6 +101,7 @@ final class OpenApiScenarioServiceRegistry {
         return indexHtml(
                 "MockServer Dashboards",
                 normalizedDashboardPath + "/styles.css",
+                homeLink("/"),
                 services.stream()
                         .map(service -> new IndexLink(
                                 service.id(),
@@ -108,8 +110,38 @@ final class OpenApiScenarioServiceRegistry {
                         .toList());
     }
 
+    String rootIndexHtml(String dashboardPath, String docsPath) {
+        return rootHtml(
+                "MockServer",
+                "/styles.css",
+                List.of(
+                        new IconLink(
+                                "Dashboard",
+                                normalizedPath(dashboardPath),
+                                "/icons/mockserver-icon.png"),
+                        new IconLink(
+                                "OpenAPI UI",
+                                normalizedPath(docsPath),
+                                "/icons/swagger-svgrepo-com.svg")));
+    }
+
     String indexStylesCss() {
         return resource(INDEX_RESOURCE_ROOT + "styles.css");
+    }
+
+    Optional<IndexAsset> indexAsset(String requestPath) {
+        return switch (requestPath) {
+            case "/styles.css" -> Optional.of(new IndexAsset(
+                    "text/css; charset=utf-8", resourceBytes(INDEX_RESOURCE_ROOT + "styles.css")));
+            case "/icons/mockserver-icon.png" -> Optional.of(new IndexAsset(
+                    "image/png", resourceBytes(INDEX_RESOURCE_ROOT + "icons/mockserver-icon.png")));
+            case "/icons/swagger-svgrepo-com.svg" -> Optional.of(new IndexAsset(
+                    "image/svg+xml; charset=utf-8",
+                    resourceBytes(INDEX_RESOURCE_ROOT + "icons/swagger-svgrepo-com.svg")));
+            case "/icons/home-icon.png" -> Optional.of(new IndexAsset(
+                    "image/png", resourceBytes(INDEX_RESOURCE_ROOT + "icons/home-icon.png")));
+            default -> Optional.empty();
+        };
     }
 
     private static List<Path> discoverSpecPaths(Path specDirectory) {
@@ -229,7 +261,26 @@ final class OpenApiScenarioServiceRegistry {
         }
     }
 
-    private static String indexHtml(String title, String stylesPath, List<IndexLink> links) {
+    private static String rootHtml(String title, String stylesPath, List<IconLink> links) {
+        var linkTemplate = resource(INDEX_RESOURCE_ROOT + "root-link.html");
+        var renderedLinks = new StringBuilder();
+        for (var link : links) {
+            renderedLinks.append(template(
+                    linkTemplate,
+                    Map.of(
+                            "{{href}}", htmlAttribute(link.href()),
+                            "{{iconPath}}", htmlAttribute(link.iconPath()),
+                            "{{label}}", html(link.label()))));
+        }
+        return template(
+                resource(INDEX_RESOURCE_ROOT + "root.html"),
+                Map.of(
+                        "{{title}}", html(title),
+                        "{{stylesPath}}", htmlAttribute(stylesPath),
+                        "{{links}}", renderedLinks.toString()));
+    }
+
+    private static String indexHtml(String title, String stylesPath, String homeLink, List<IndexLink> links) {
         var linkTemplate = resource(INDEX_RESOURCE_ROOT + "link.html");
         var renderedLinks = new StringBuilder();
         for (var link : links) {
@@ -245,7 +296,16 @@ final class OpenApiScenarioServiceRegistry {
                 Map.of(
                         "{{title}}", html(title),
                         "{{stylesPath}}", htmlAttribute(stylesPath),
+                        "{{homeLink}}", homeLink,
                         "{{links}}", renderedLinks.toString()));
+    }
+
+    private static String homeLink(String href) {
+        return template(
+                resource(INDEX_RESOURCE_ROOT + "home-link.html"),
+                Map.of(
+                        "{{href}}", htmlAttribute(href),
+                        "{{iconPath}}", htmlAttribute("/icons/home-icon.png")));
     }
 
     private static String template(String source, Map<String, String> replacements) {
@@ -257,11 +317,15 @@ final class OpenApiScenarioServiceRegistry {
     }
 
     private static String resource(String resourcePath) {
+        return new String(resourceBytes(resourcePath), UTF_8);
+    }
+
+    private static byte[] resourceBytes(String resourcePath) {
         try (var stream = OpenApiScenarioServiceRegistry.class.getClassLoader().getResourceAsStream(resourcePath)) {
             if (stream == null) {
                 throw new OpenApiScenarioException("Missing OpenAPI scenario index resource: " + resourcePath);
             }
-            return new String(stream.readAllBytes(), UTF_8);
+            return stream.readAllBytes();
         } catch (IOException e) {
             throw new OpenApiScenarioException("Unable to read OpenAPI scenario index resource: " + resourcePath, e);
         }
@@ -313,6 +377,8 @@ final class OpenApiScenarioServiceRegistry {
 
     record Service(String id, Path specPath, int publicPort, OpenApiScenarioRequestValidator validator) {}
 
+    record IndexAsset(String contentType, byte[] body) {}
+
     record RequestMatch(Service service, OpenApiScenarioRequestValidator.ValidationResult validation) {
 
         static RequestMatch matched(Service service, OpenApiScenarioRequestValidator.ValidationResult validation) {
@@ -329,4 +395,6 @@ final class OpenApiScenarioServiceRegistry {
     }
 
     private record IndexLink(String label, int port, String href) {}
+
+    private record IconLink(String label, String href, String iconPath) {}
 }

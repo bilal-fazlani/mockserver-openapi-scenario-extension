@@ -44,7 +44,8 @@ public final class OpenApiScenarioProxy {
 
     private static final String SERVER_PORT_ENV = "SERVER_PORT";
     private static final String DEFAULT_SPEC_DIR = "/config/openapi";
-    private static final String DASHBOARD_PATH = "/mockserver/dashboard";
+    private static final String DASHBOARD_PATH = "/dashboard";
+    private static final String MOCKSERVER_DASHBOARD_PATH = "/mockserver/dashboard";
     private static final int DEFAULT_PUBLIC_PORT = 1080;
     private static final int MAX_INITIAL_REQUEST_BYTES = 64 * 1024;
     private static final int MAX_VALIDATED_BODY_BYTES = 10 * 1024 * 1024;
@@ -135,6 +136,24 @@ public final class OpenApiScenarioProxy {
 
     static boolean isIndexStylesRoute(String requestPath, String indexPath) {
         return requestPath.equals(normalizedDocsPath(indexPath) + "/styles.css");
+    }
+
+    static boolean isRootIndexRoute(String requestPath) {
+        return requestPath.equals("/") || requestPath.equals("/index.html");
+    }
+
+    static boolean isRootAssetRoute(String requestPath) {
+        return requestPath.equals("/styles.css") || requestPath.startsWith("/icons/");
+    }
+
+    static String dashboardTargetOverride(String requestPath) {
+        if (requestPath.equals(DASHBOARD_PATH)) {
+            return MOCKSERVER_DASHBOARD_PATH;
+        }
+        if (requestPath.startsWith(DASHBOARD_PATH + "/")) {
+            return MOCKSERVER_DASHBOARD_PATH + requestPath.substring(DASHBOARD_PATH.length());
+        }
+        return null;
     }
 
     static void configureMockServerEnvironment(Map<String, String> environment, int mockServerPort, Path specPath) {
@@ -320,6 +339,33 @@ public final class OpenApiScenarioProxy {
                 return;
             }
 
+            if (isRootIndexRoute(initialRequest.path())) {
+                sendResponse(
+                        clientSocket.getOutputStream(),
+                        initialRequest.method(),
+                        200,
+                        "OK",
+                        "text/html; charset=utf-8",
+                        registry.rootIndexHtml(DASHBOARD_PATH, docsPath));
+                return;
+            }
+
+            if (isRootAssetRoute(initialRequest.path())) {
+                var asset = registry.indexAsset(initialRequest.path());
+                if (asset.isPresent()) {
+                    sendResponse(
+                            clientSocket.getOutputStream(),
+                            initialRequest.method(),
+                            200,
+                            "OK",
+                            asset.get().contentType(),
+                            asset.get().body());
+                    return;
+                }
+                sendNotFound(clientSocket.getOutputStream(), initialRequest.method());
+                return;
+            }
+
             if (isIndexRoute(initialRequest.path(), docsPath)) {
                 sendResponse(
                         clientSocket.getOutputStream(),
@@ -385,14 +431,15 @@ public final class OpenApiScenarioProxy {
                 return;
             }
 
-            if (isMockServerRoute(initialRequest.path()) || initialRequest.isWebSocketUpgrade()) {
+            var dashboardTargetOverride = dashboardTargetOverride(initialRequest.path());
+            if (dashboardTargetOverride != null || isMockServerRoute(initialRequest.path()) || initialRequest.isWebSocketUpgrade()) {
                 tunnelToMockServer(
                         clientSocket,
                         clientInput,
                         initialRequest,
                         new byte[0],
                         mockServer.internalPort(),
-                        null,
+                        dashboardTargetOverride,
                         executor);
                 return;
             }
@@ -546,7 +593,12 @@ public final class OpenApiScenarioProxy {
     private static void sendResponse(
             OutputStream output, String method, int status, String reason, String contentType, String body)
             throws IOException {
-        var bodyBytes = body.getBytes(UTF_8);
+        sendResponse(output, method, status, reason, contentType, body.getBytes(UTF_8));
+    }
+
+    private static void sendResponse(
+            OutputStream output, String method, int status, String reason, String contentType, byte[] bodyBytes)
+            throws IOException {
         var headers = "HTTP/1.1 "
                 + status
                 + " "

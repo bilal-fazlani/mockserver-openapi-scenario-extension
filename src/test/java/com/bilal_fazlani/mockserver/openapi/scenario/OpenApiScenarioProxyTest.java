@@ -11,18 +11,17 @@ class OpenApiScenarioProxyTest {
 
     @Test
     void treatsOnlyDocsPathAndChildrenAsDocsRoutes() {
-        assertThat(OpenApiScenarioProxy.isDocsRoute("/mockserver/openapi/docs", "/mockserver/openapi/docs"))
+        assertThat(OpenApiScenarioProxy.isDocsRoute("/openapi/docs", "/openapi/docs"))
                 .isTrue();
-        assertThat(OpenApiScenarioProxy.isDocsRoute("/mockserver/openapi/docs/", "/mockserver/openapi/docs"))
+        assertThat(OpenApiScenarioProxy.isDocsRoute("/openapi/docs/", "/openapi/docs"))
                 .isTrue();
-        assertThat(OpenApiScenarioProxy.isDocsRoute("/mockserver/openapi/docs/scenarios.js", "/mockserver/openapi/docs"))
+        assertThat(OpenApiScenarioProxy.isDocsRoute("/openapi/docs/scenarios.js", "/openapi/docs"))
                 .isTrue();
-        assertThat(OpenApiScenarioProxy.isDocsRoute("/mockserver/openapi/docs-extra", "/mockserver/openapi/docs"))
+        assertThat(OpenApiScenarioProxy.isDocsRoute("/openapi/docs-extra", "/openapi/docs"))
                 .isFalse();
-        assertThat(OpenApiScenarioProxy.isDocsRoute("/mockserver/dashboard", "/mockserver/openapi/docs"))
+        assertThat(OpenApiScenarioProxy.isDocsRoute("/dashboard", "/openapi/docs"))
                 .isFalse();
-        assertThat(OpenApiScenarioProxy.isDocsRoute("/v1/fraud/assessment", "/mockserver/openapi/docs"))
-                .isFalse();
+        assertThat(OpenApiScenarioProxy.isDocsRoute("/v1/fraud/assessment", "/openapi/docs")).isFalse();
     }
 
     @Test
@@ -36,15 +35,33 @@ class OpenApiScenarioProxyTest {
 
     @Test
     void treatsAdminIndexStylesheetsAsIndexAssets() {
-        assertThat(OpenApiScenarioProxy.isIndexStylesRoute(
-                        "/mockserver/openapi/docs/styles.css", "/mockserver/openapi/docs"))
+        assertThat(OpenApiScenarioProxy.isIndexStylesRoute("/openapi/docs/styles.css", "/openapi/docs"))
                 .isTrue();
-        assertThat(OpenApiScenarioProxy.isIndexStylesRoute(
-                        "/mockserver/dashboard/styles.css", "/mockserver/dashboard"))
+        assertThat(OpenApiScenarioProxy.isIndexStylesRoute("/dashboard/styles.css", "/dashboard"))
                 .isTrue();
-        assertThat(OpenApiScenarioProxy.isIndexStylesRoute(
-                        "/mockserver/openapi/docs-extra/styles.css", "/mockserver/openapi/docs"))
+        assertThat(OpenApiScenarioProxy.isIndexStylesRoute("/openapi/docs-extra/styles.css", "/openapi/docs"))
                 .isFalse();
+    }
+
+    @Test
+    void treatsRootIndexAndRootAssetsAsAdminRoutes() {
+        assertThat(OpenApiScenarioProxy.isRootIndexRoute("/")).isTrue();
+        assertThat(OpenApiScenarioProxy.isRootIndexRoute("/index.html")).isTrue();
+        assertThat(OpenApiScenarioProxy.isRootAssetRoute("/styles.css")).isTrue();
+        assertThat(OpenApiScenarioProxy.isRootAssetRoute("/icons/mockserver-icon.png")).isTrue();
+        assertThat(OpenApiScenarioProxy.isRootAssetRoute("/icons/swagger-svgrepo-com.svg")).isTrue();
+        assertThat(OpenApiScenarioProxy.isRootAssetRoute("/icons/home-icon.png")).isTrue();
+        assertThat(OpenApiScenarioProxy.isRootAssetRoute("/v1/fraud/assessment")).isFalse();
+    }
+
+    @Test
+    void mapsCleanDashboardRoutesToMockServerDashboardRoutes() {
+        assertThat(OpenApiScenarioProxy.dashboardTargetOverride("/dashboard")).isEqualTo("/mockserver/dashboard");
+        assertThat(OpenApiScenarioProxy.dashboardTargetOverride("/dashboard/")).isEqualTo("/mockserver/dashboard/");
+        assertThat(OpenApiScenarioProxy.dashboardTargetOverride("/dashboard/mockserver/retrieve"))
+                .isEqualTo("/mockserver/dashboard/mockserver/retrieve");
+        assertThat(OpenApiScenarioProxy.dashboardTargetOverride("/mockserver/dashboard")).isNull();
+        assertThat(OpenApiScenarioProxy.dashboardTargetOverride("/v1/fraud/assessment")).isNull();
     }
 
     @Test

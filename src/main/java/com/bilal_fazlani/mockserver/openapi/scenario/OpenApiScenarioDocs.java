@@ -27,7 +27,7 @@ public class OpenApiScenarioDocs {
     /**
      * Default path where the documentation UI is served.
      */
-    public static final String DEFAULT_DOCS_PATH = "/mockserver/openapi/docs";
+    public static final String DEFAULT_DOCS_PATH = "/openapi/docs";
 
     private static final int DOCS_PRIORITY = 1_000_000;
     private static final String DOCS_RESOURCE_ROOT = "mockserver-openapi-scenario-docs/";
